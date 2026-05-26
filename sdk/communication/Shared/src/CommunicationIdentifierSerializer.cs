@@ -3,27 +3,36 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text.Json;
 
 namespace Azure.Communication
 {
     internal class CommunicationIdentifierSerializer
     {
+        private const string CommunicationUserKindValue = "communicationUser";
+        private const string PhoneNumberKindValue = "phoneNumber";
+        private const string MicrosoftTeamsUserKindValue = "microsoftTeamsUser";
+        private const string MicrosoftTeamsAppKindValue = "microsoftTeamsApp";
+        private const string TeamsExtensionUserKindValue = "teamsExtensionUser";
+        private const string TeamsExtensionUserPropertyName = "TeamsExtensionUser";
+        private const string TeamsExtensionUserModelName = "TeamsExtensionUserIdentifierModel";
+
         public static CommunicationIdentifier Deserialize(CommunicationIdentifierModel identifier)
         {
             string rawId = AssertNotNull(identifier.RawId, nameof(identifier.RawId), nameof(CommunicationIdentifierModel));
 
             AssertMaximumOneNestedModel(identifier);
 
-            var kind = identifier.Kind ?? GetKind(identifier);
+            var kind = identifier.Kind?.ToString() ?? GetKindValue(identifier);
 
-            if (kind == CommunicationIdentifierModelKind.CommunicationUser
+            if (string.Equals(kind, CommunicationUserKindValue, StringComparison.OrdinalIgnoreCase)
                 && identifier.CommunicationUser is not null)
             {
                 return new CommunicationUserIdentifier(AssertNotNull(identifier.CommunicationUser.Id, nameof(identifier.CommunicationUser.Id), nameof(CommunicationUserIdentifierModel)));
             }
 
-            if (kind == CommunicationIdentifierModelKind.PhoneNumber
+            if (string.Equals(kind, PhoneNumberKindValue, StringComparison.OrdinalIgnoreCase)
                 && identifier.PhoneNumber is not null)
             {
                 return new PhoneNumberIdentifier(
@@ -31,7 +40,7 @@ namespace Azure.Communication
                     AssertNotNull(identifier.RawId, nameof(identifier.RawId), nameof(PhoneNumberIdentifierModel)));
             }
 
-            if (kind == CommunicationIdentifierModelKind.MicrosoftTeamsUser
+            if (string.Equals(kind, MicrosoftTeamsUserKindValue, StringComparison.OrdinalIgnoreCase)
                 && identifier.MicrosoftTeamsUser is not null)
             {
                 var user = identifier.MicrosoftTeamsUser;
@@ -42,13 +51,25 @@ namespace Azure.Communication
                       rawId);
             }
 
-            if (kind == CommunicationIdentifierModelKind.MicrosoftTeamsApp
+            if (string.Equals(kind, MicrosoftTeamsAppKindValue, StringComparison.OrdinalIgnoreCase)
                  && identifier.MicrosoftTeamsApp is not null)
             {
                 var app = identifier.MicrosoftTeamsApp;
                 return new MicrosoftTeamsAppIdentifier(
                       AssertNotNull(app.AppId, nameof(app.AppId), nameof(MicrosoftTeamsAppIdentifierModel)),
                       Deserialize(AssertNotNull(app.Cloud, nameof(app.Cloud), nameof(MicrosoftTeamsAppIdentifierModel))));
+            }
+
+            object teamsExtensionUser = GetPropertyValue(identifier, TeamsExtensionUserPropertyName);
+            if (string.Equals(kind, TeamsExtensionUserKindValue, StringComparison.OrdinalIgnoreCase)
+                && teamsExtensionUser is not null)
+            {
+                return new TeamsExtensionUserIdentifier(
+                    AssertNotNull((string)GetPropertyValue(teamsExtensionUser, "UserId"), "UserId", TeamsExtensionUserModelName),
+                    AssertNotNull((string)GetPropertyValue(teamsExtensionUser, "TenantId"), "TenantId", TeamsExtensionUserModelName),
+                    AssertNotNull((string)GetPropertyValue(teamsExtensionUser, "ResourceId"), "ResourceId", TeamsExtensionUserModelName),
+                    Deserialize(AssertNotNull((CommunicationCloudEnvironmentModel?)GetPropertyValue(teamsExtensionUser, "Cloud"), "Cloud", TeamsExtensionUserModelName)),
+                    rawId);
             }
 
             return new UnknownIdentifier(rawId);
@@ -64,6 +85,8 @@ namespace Azure.Communication
                     presentProperties.Add(nameof(identifier.MicrosoftTeamsUser));
                 if (identifier.MicrosoftTeamsApp is not null)
                     presentProperties.Add(nameof(identifier.MicrosoftTeamsApp));
+                if (GetPropertyValue(identifier, TeamsExtensionUserPropertyName) is not null)
+                    presentProperties.Add(TeamsExtensionUserPropertyName);
 
                 if (presentProperties.Count > 1)
                     throw new JsonException($"Only one of the properties in {{{string.Join(", ", presentProperties)}}} should be present.");
@@ -71,28 +94,36 @@ namespace Azure.Communication
         }
 
         internal static CommunicationIdentifierModelKind GetKind(CommunicationIdentifierModel identifier)
+            => new CommunicationIdentifierModelKind(GetKindValue(identifier));
+
+        internal static string GetKindValue(CommunicationIdentifierModel identifier)
         {
             if (identifier.CommunicationUser is not null)
             {
-                return CommunicationIdentifierModelKind.CommunicationUser;
+                return CommunicationUserKindValue;
             }
 
             if (identifier.PhoneNumber is not null)
             {
-                return CommunicationIdentifierModelKind.PhoneNumber;
+                return PhoneNumberKindValue;
             }
 
             if (identifier.MicrosoftTeamsUser is not null)
             {
-                return CommunicationIdentifierModelKind.MicrosoftTeamsUser;
+                return MicrosoftTeamsUserKindValue;
             }
 
             if (identifier.MicrosoftTeamsApp is not null)
             {
-                return CommunicationIdentifierModelKind.MicrosoftTeamsApp;
+                return MicrosoftTeamsAppKindValue;
             }
 
-            return CommunicationIdentifierModelKind.Unknown;
+            if (GetPropertyValue(identifier, TeamsExtensionUserPropertyName) is not null)
+            {
+                return TeamsExtensionUserKindValue;
+            }
+
+            return CommunicationIdentifierModelKind.Unknown.ToString();
         }
 
         internal static CommunicationCloudEnvironment Deserialize(CommunicationCloudEnvironmentModel cloud)
@@ -115,11 +146,7 @@ namespace Azure.Communication
                     RawId = u.Id,
                     CommunicationUser = new CommunicationUserIdentifierModel(u.Id),
                 },
-                PhoneNumberIdentifier p => new CommunicationIdentifierModel
-                {
-                    RawId = p.RawId,
-                    PhoneNumber = new PhoneNumberIdentifierModel(p.PhoneNumber),
-                },
+                PhoneNumberIdentifier p => SerializePhoneNumber(p),
                 MicrosoftTeamsUserIdentifier u => new CommunicationIdentifierModel
                 {
                     RawId = u.RawId,
@@ -137,12 +164,44 @@ namespace Azure.Communication
                         Cloud = Serialize(app.Cloud),
                     }
                 },
+                TeamsExtensionUserIdentifier user => SerializeTeamsExtensionUser(user),
                 UnknownIdentifier u => new CommunicationIdentifierModel
                 {
                     RawId = u.Id
                 },
                 _ => throw new NotSupportedException(),
             };
+
+        private static CommunicationIdentifierModel SerializePhoneNumber(PhoneNumberIdentifier identifier)
+        {
+            var phoneNumber = new PhoneNumberIdentifierModel(identifier.PhoneNumber);
+            SetPropertyValue(phoneNumber, "IsAnonymous", identifier.IsAnonymous);
+            SetPropertyValue(phoneNumber, "AssertedId", identifier.AssertedId);
+
+            return new CommunicationIdentifierModel
+            {
+                RawId = identifier.RawId,
+                PhoneNumber = phoneNumber,
+            };
+        }
+
+        private static CommunicationIdentifierModel SerializeTeamsExtensionUser(TeamsExtensionUserIdentifier identifier)
+        {
+            var model = new CommunicationIdentifierModel
+            {
+                RawId = identifier.RawId,
+            };
+
+            object teamsExtensionUser = CreatePropertyInstance(model, TeamsExtensionUserPropertyName, identifier.UserId, identifier.TenantId, identifier.ResourceId);
+            if (teamsExtensionUser is null)
+            {
+                throw new NotSupportedException($"{nameof(TeamsExtensionUserIdentifier)} is not supported by this package version.");
+            }
+
+            SetPropertyValue(teamsExtensionUser, "Cloud", Serialize(identifier.Cloud));
+            SetPropertyValue(model, TeamsExtensionUserPropertyName, teamsExtensionUser);
+            return model;
+        }
 
         internal static CommunicationCloudEnvironmentModel Serialize(CommunicationCloudEnvironment cloud)
         {
@@ -165,6 +224,21 @@ namespace Azure.Communication
                 throw new JsonException($"Property '{name}' is required for identifier of type `{type}`.");
 
             return value.Value;
+        }
+
+        private static object GetPropertyValue(object instance, string propertyName)
+            => instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public)?.GetValue(instance);
+
+        private static void SetPropertyValue(object instance, string propertyName, object value)
+        {
+            PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            property?.SetValue(instance, value);
+        }
+
+        private static object CreatePropertyInstance(object instance, string propertyName, params object[] constructorArguments)
+        {
+            PropertyInfo property = instance.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            return property is null ? null : Activator.CreateInstance(property.PropertyType, constructorArguments);
         }
     }
 }

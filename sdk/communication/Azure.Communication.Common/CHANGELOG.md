@@ -8,6 +8,8 @@
 
 ### Bugs Fixed
 
+- Updated the shared `CommunicationIdentifierSerializer` used by communication SDKs to support `TeamsExtensionUserIdentifier` and Call Automation identifier payloads such as phone number anonymity and asserted IDs.
+
 ### Other Changes
 
 ## 1.4.0 (2025-06-04)

@@ -30,6 +30,23 @@ This module does not contain a client and instead libraries that help other Azur
 
 ### Key concepts
 
+### Communication identifiers
+
+Azure Communication libraries share a common identifier model through `Azure.Communication.Common`. This includes `CommunicationUserIdentifier`, `PhoneNumberIdentifier`, `MicrosoftTeamsUserIdentifier`, `MicrosoftTeamsAppIdentifier`, and `TeamsExtensionUserIdentifier`.
+
+For Teams Phone Extensibility scenarios, you can construct a `TeamsExtensionUserIdentifier` directly or round-trip it through `CommunicationIdentifier.RawId` and `CommunicationIdentifier.FromRawId(string)` when storing identifiers outside the SDK.
+
+```csharp
+CommunicationIdentifier identifier = new TeamsExtensionUserIdentifier(
+    userId: "207ffef6-9444-41fb-92ab-20eacaae2768",
+    tenantId: "45ab2481-1c1c-4005-be24-0ffb879b1130",
+    resourceId: "bbbcbc1e-9f06-482a-b5d8-20e3f26ef0cd",
+    cloud: CommunicationCloudEnvironment.Public);
+
+string rawId = identifier.RawId;
+CommunicationIdentifier roundTripped = CommunicationIdentifier.FromRawId(rawId);
+```
+
 ### CommunicationTokenCredential
 
 The `CommunicationTokenCredential` object is used to authenticate a user with Communication Services, such as Chat or Calling. It optionally provides an auto-refresh mechanism to ensure a continuously stable authentication state during communications.
